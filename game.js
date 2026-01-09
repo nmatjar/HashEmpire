@@ -1,3 +1,4 @@
+import { SpeedInsights } from "@vercel/speed-insights/next";
 // Empire Engine: The Illumination Clicker - Core System
 // Reality Game with Analytics Tracking for Oriental Group
 
@@ -603,6 +604,15 @@ class HashishEmpire {
 
     // PATCH v1.1: Initialize tier-based event pool
     initializeTierEventPool() {
+        // Prefer external per-empire configuration if available (window.EMPIRE_DATA)
+        try {
+            const empireKey = this.empireKey || 'default';
+            const ext = window.EMPIRE_DATA && window.EMPIRE_DATA[empireKey] && window.EMPIRE_DATA[empireKey].events;
+            if (ext) return ext;
+        } catch (e) {
+            // fallthrough to built-in pool
+        }
+
         return {
             tier1: [
                 { title: 'First Sale Success', description: 'Your first customer pays!', option1: { text: 'Accept Payment', reward: 1.2 }, option2: { text: 'Negotiate Higher', reward: 1.05 } },
