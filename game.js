@@ -32,7 +32,12 @@ class HashishEmpire {
             totalClicks: 0,
             totalHashEarned: 0,
             gameStartTime: Date.now(),
-            lastSave: Date.now()
+            lastSave: Date.now(),
+            // PATCH v1.1: Prestige Acceleration & Token Shop
+            prestigeRushActive: false,
+            tokenShopPurchases: {},
+            hasDoubleTokenBuff: false,
+            acceleratedProgressionActive: false
         };
 
         this.upgrades = {
@@ -40,6 +45,44 @@ class HashishEmpire {
             distribution: this.config.upgrades?.distribution || [],
             influence: this.config.upgrades?.influence || []
         };
+
+        // PATCH v1.1: Token Shop System
+        this.tokenShop = {
+            'enlightenment_rush': {
+                name: '⚡ Enlightenment Rush',
+                description: 'Next prestige: 3x token payout',
+                cost: 2,
+                purchased: false,
+                apply: (game) => { game.gameState.hasDoubleTokenBuff = true; }
+            },
+            'dimensional_echo': {
+                name: '🌀 Dimensional Echo',
+                description: 'Prestige now earns 2x tokens (permanent)',
+                cost: 5,
+                purchased: false,
+                apply: (game) => { game.prestigeTokenMultiplier = 2; }
+            },
+            'architect_insight': {
+                name: '🏛️ Architect\'s Insight',
+                description: 'Next run: Skip first 5 levels (fast-track to L6)',
+                cost: 10,
+                purchased: false,
+                apply: (game) => { game.gameState.acceleratedProgressionActive = true; }
+            },
+            'prime_directive': {
+                name: '🎯 Prime Directive',
+                description: 'Auto-prestige trigger at Level 20 (must enable in settings)',
+                cost: 15,
+                purchased: false,
+                apply: (game) => { game.autoPrestigenabled = true; }
+            }
+        };
+        this.prestigeTokenMultiplier = 1;
+        this.autoPrestigenabled = false;
+
+        // PATCH v1.1: Tier-Based Events System
+        this.tierEventPool = this.initializeTierEventPool();
+        this.lastEventTrigger = Date.now();
 
         this.analytics = {
             playerChoices: [],
@@ -65,9 +108,12 @@ class HashishEmpire {
         this.applyProfileMetrics(); // Apply psychometrics to game physics
         // Upgrades are now initialized via config injection in constructor
         this.initializeEventListeners();
+        this.initializeVisuals();
         this.startGameLoop();
         this.loadGame();
         this.updateDisplay();
+        // PATCH v1.1: Initialize terminal tutorial
+        this.setupTerminalTutorial();
     }
 
     // METHODOLOGY: ProfileCoder Adapter
@@ -113,6 +159,60 @@ class HashishEmpire {
                 window.terminal.toggleTerminal();
             }
         });
+        
+        // Audio settings modal
+        const audioToggleBtn = document.getElementById('audio-toggle-btn');
+        const audioModal = document.getElementById('audio-modal');
+        if (audioToggleBtn && audioModal) {
+            audioToggleBtn.addEventListener('click', () => {
+                audioModal.classList.remove('hidden');
+            });
+        }
+
+        // Volume control
+        const masterVolume = document.getElementById('master-volume');
+        const masterVolumeDisplay = document.getElementById('master-volume-display');
+        if (masterVolume) {
+            masterVolume.addEventListener('input', (e) => {
+                const vol = e.target.value;
+                masterVolumeDisplay.textContent = vol + '%';
+                localStorage.setItem('hashish_masterVolume', vol);
+            });
+            // Load saved volume
+            const savedVol = localStorage.getItem('hashish_masterVolume');
+            if (savedVol) {
+                masterVolume.value = savedVol;
+                masterVolumeDisplay.textContent = savedVol + '%';
+            }
+        }
+
+        // Audio checkboxes
+        ['click-sound', 'notification-sound', 'bg-music'].forEach(id => {
+            const checkbox = document.getElementById(id);
+            if (checkbox) {
+                checkbox.addEventListener('change', (e) => {
+                    localStorage.setItem('hashish_' + id, e.target.checked);
+                });
+                // Load saved state
+                const saved = localStorage.getItem('hashish_' + id);
+                if (saved !== null) {
+                    checkbox.checked = saved === 'true';
+                }
+            }
+        });
+        
+        // Change Empire button logic
+        const empireBtn = document.getElementById('change-empire-btn');
+        if (localStorage.getItem('hashish_empire_unlocked') === 'true') {
+            empireBtn.classList.remove('hidden');
+        }
+        
+        empireBtn.addEventListener('click', () => {
+            if (confirm('Return to Empire Selection? Current progress will be saved.')) {
+                this.saveGame();
+                location.reload(); // Reload triggers the Launcher check in DOMContentLoaded
+            }
+        });
 
         // Prestige button
         document.getElementById('prestige-btn').addEventListener('click', () => this.prestige());
@@ -132,6 +232,82 @@ class HashishEmpire {
                 this.handleEventChoice(2);
             }
         });
+    }
+
+    // Initialize visual theme based on empire
+    initializeVisuals() {
+        if (window.EMPIRE_DATA && this.empireKey && window.EMPIRE_DATA[this.empireKey]) {
+            const meta = window.EMPIRE_DATA[this.empireKey].meta;
+            
+            // 1. Main Click Icon
+            const plantIcon = document.querySelector('.plant-icon');
+            if (plantIcon) {
+                plantIcon.textContent = meta.icon;
+            }
+
+            // 2. Plant Background & Styling (Aesthetic override)
+            const plant = document.getElementById('hashish-plant');
+            if (plant) {
+                if (this.empireKey === 'nexus') {
+                    plant.style.background = 'radial-gradient(circle, #003366, #000033)';
+                    plant.style.borderColor = '#00ffff';
+                    plant.style.boxShadow = '0 0 30px rgba(0, 255, 255, 0.5)';
+                } else if (this.empireKey === 'verdant') {
+                    plant.style.background = 'radial-gradient(circle, #55aa00, #113300)';
+                    plant.style.borderColor = '#ffcc00';
+                    plant.style.boxShadow = '0 0 30px rgba(255, 204, 0, 0.5)';
+                }
+                // Syndicate uses default CSS
+            }
+            
+            // 3. High Level Indicator (Illuminati Eye replacement)
+            this.updateHighLevelIndicator();
+        }
+
+        // 4. Hide Prestige tab initially (unlock at Level 10)
+        this.updatePrestigeTabVisibility();
+    }
+
+    updatePrestigeTabVisibility() {
+        const prestigeTab = document.querySelector('[data-tab="prestige"]');
+        if (prestigeTab) {
+            if (this.gameState.illuminationLevel >= 10) {
+                prestigeTab.classList.remove('hidden');
+            } else {
+                prestigeTab.classList.add('hidden');
+            }
+        }
+    }
+
+    updateHighLevelIndicator() {
+        const container = document.getElementById('illuminati-eye');
+        if (!container) return;
+        
+        const symbol = container.querySelector('.eye-symbol');
+        const sub = container.querySelector('.pyramid');
+        
+        if (this.empireKey === 'verdant') {
+            // Ecological: Illuminati disappears, replaced by Gaia/Nature symbol
+            symbol.textContent = '🌳'; 
+            sub.textContent = '∞';
+            symbol.style.color = '#ffcc00';
+            symbol.style.textShadow = '0 0 20px #ffcc00';
+            sub.style.color = '#88ff00';
+        } else if (this.empireKey === 'nexus') {
+            // Corporate: Replaced by Tech/AI symbol
+            symbol.textContent = '💠';
+            sub.textContent = '☁️';
+            symbol.style.color = '#00ffff';
+            symbol.style.textShadow = '0 0 20px #00ffff';
+            sub.style.color = '#ffffff';
+        } else {
+            // Syndicate: Default Illuminati
+            symbol.textContent = '👁';
+            sub.textContent = '▲';
+            symbol.style.color = ''; // Revert to CSS
+            symbol.style.textShadow = '';
+            sub.style.color = '';
+        }
     }
 
     // Main clicking handler with analytics
@@ -337,38 +513,29 @@ class HashishEmpire {
 
     // Random events system
     triggerRandomEvent() {
-        // Adjust event frequency/severity based on ProfileCoder Risk Tolerance
-        const riskMod = this.profile.psychometrics.riskTolerance;
+        // PATCH v1.1: Tier-based event selection with scaling
+        let tierEvents = [];
+        const level = this.gameState.illuminationLevel;
         
-        // High risk tolerance players get more volatile events (bigger losses, bigger gains)
-        const volatility = 0.2 + (riskMod * 0.5); 
+        if (level <= 5) tierEvents = this.tierEventPool.tier1;
+        else if (level <= 10) tierEvents = this.tierEventPool.tier2;
+        else if (level <= 15) tierEvents = this.tierEventPool.tier3;
+        else if (level <= 20) tierEvents = this.tierEventPool.tier4;
+        else tierEvents = this.tierEventPool.tier5;
 
-        const events = [
-            {
-                title: 'Police Raid!',
-                description: 'Authorities are closing in on one of your operations.',
-                option1: { text: `Pay Bribe (${Math.floor(50 * volatility)}% ${this.config.currencySymbol})`, cost: 0.5 * volatility },
-                option2: { text: `Take the Loss (${Math.floor(20 * volatility)}% ${this.config.currencySymbol})`, cost: 0.2 * volatility }
-            },
-            {
-                title: 'New Market Opportunity',
-                description: 'A new demographic shows interest in your products.',
-                option1: { text: `Invest Heavily (30% ${this.config.currencySymbol})`, cost: 0.3, reward: 1.5 + riskMod }, // Higher reward for risk takers
-                option2: { text: `Conservative Approach (10% ${this.config.currencySymbol})`, cost: 0.1, reward: 1.2 }
-            },
-            {
-                title: 'Competitor Threat',
-                description: 'A rival organization is moving into your territory.',
-                option1: { text: 'Aggressive Response (40% HU)', cost: 0.4 },
-                option2: { text: 'Negotiate Territory (15% HU)', cost: 0.15 }
-            }
-        ];
+        const baseEvent = tierEvents[Math.floor(Math.random() * tierEvents.length)];
+        const event = JSON.parse(JSON.stringify(baseEvent)); // Deep copy
+        
+        // PATCH v1.1: Scale event rewards by level
+        const rewardScale = 1 + (level * 0.05); // Scale multiplier by level
+        if (event.option1.reward) event.option1.reward *= rewardScale;
+        if (event.option2.reward) event.option2.reward *= rewardScale;
+        if (event.option3 && event.option3.reward) event.option3.reward *= rewardScale;
 
-        const event = events[Math.floor(Math.random() * events.length)];
         this.showEvent(event);
     }
 
-    // Show event modal
+    // Show event modal (PATCH v1.1: Support 3 options)
     showEvent(event) {
         const modal = document.getElementById('event-modal');
         const title = document.getElementById('modal-title');
@@ -385,20 +552,40 @@ class HashishEmpire {
         this.currentEvent = event;
     }
 
-    // Handle event response
+    // Handle event response (PATCH v1.1: Support option 3 and token rewards)
     handleEventResponse(choice) {
+        // PATCH v1.1: Terminal tutorial handling
+        if (this.currentTerminalTutorial) {
+            if (choice === 1) {
+                this.gameState.hashUnits += 10000;
+                this.addToLog('🖥️ TERMINAL UNLOCKED: Type \'help\' to see available commands');
+                if (window.terminal) window.terminal.toggleTerminal();
+            }
+            this.currentTerminalTutorial = false;
+            document.getElementById('event-modal').classList.add('hidden');
+            return;
+        }
+
         if (!this.currentEvent) return;
 
-        const option = choice === 1 ? this.currentEvent.option1 : this.currentEvent.option2;
-        const cost = this.gameState.hashUnits * option.cost;
+        const optionMap = { 1: 'option1', 2: 'option2', 3: 'option3' };
+        const option = this.currentEvent[optionMap[choice]];
+        if (!option) return;
         
+        const cost = this.gameState.hashUnits * (option.cost || 0);
         this.gameState.hashUnits -= cost;
         
         if (option.reward) {
             setTimeout(() => {
                 this.gameState.hashUnits *= option.reward;
-                this.addToLog(`Event reward: ${option.reward}x multiplier applied!`);
+                this.addToLog(`Event reward: ${option.reward.toFixed(2)}x multiplier applied!`);
             }, 2000);
+        }
+        
+        // PATCH v1.1: Token rewards from special events
+        if (option.tokens) {
+            this.gameState.enlightenmentTokens += option.tokens;
+            this.addToLog(`✨ Special event: +${option.tokens} Enlightenment Tokens!`);
         }
 
         // Analytics tracking
@@ -414,27 +601,120 @@ class HashishEmpire {
         this.currentEvent = null;
     }
 
-    // Prestige system
+    // PATCH v1.1: Initialize tier-based event pool
+    initializeTierEventPool() {
+        return {
+            tier1: [
+                { title: 'First Sale Success', description: 'Your first customer pays!', option1: { text: 'Accept Payment', reward: 1.2 }, option2: { text: 'Negotiate Higher', reward: 1.05 } },
+                { title: 'Got a Regular Customer', description: 'Someone wants to buy again.', option1: { text: 'Offer Discount', reward: 1.3 }, option2: { text: 'Keep Same Price', reward: 1.1 } }
+            ],
+            tier2: [
+                { title: 'Police Patrol (Mild)', description: 'Authorities passing by.', option1: { text: 'Lay Low (5% cost)', cost: 0.05, reward: 1.15 }, option2: { text: 'Ignore (risky)', cost: 0, reward: 1.05 } },
+                { title: 'New Market Opportunity', description: 'New demographic interested.', option1: { text: 'Invest 20%', cost: 0.2, reward: 1.4 }, option2: { text: 'Invest 10%', cost: 0.1, reward: 1.2 } },
+                { title: 'Supplier Issues (Mild)', description: 'Regular supplier has problems.', option1: { text: 'Find New Supplier (10%)', cost: 0.1, reward: 1.15 }, option2: { text: 'Wait it Out', cost: 0, reward: 1.05 } }
+            ],
+            tier3: [
+                { title: 'Police Raid (High Stakes)', description: 'Serious authorities closing in.', option1: { text: 'Pay Bribe (30%)', cost: 0.3, reward: 1.5 }, option2: { text: 'Evade (20%)', cost: 0.2, reward: 1.2 }, option3: { text: 'Surrender Stash (50%)', cost: 0.5, reward: 1.0 } },
+                { title: 'Market Consolidation Opportunity', description: 'Merge with local network?', option1: { text: 'Merge Aggressively (40%)', cost: 0.4, reward: 2.0 }, option2: { text: 'Friendly Merge (25%)', cost: 0.25, reward: 1.6 }, option3: { text: 'Decline', cost: 0, reward: 1.0 } },
+                { title: 'Rival Territory War', description: 'Gang conflict emerging.', option1: { text: 'Fortify & Fight (35%)', cost: 0.35, reward: 1.8 }, option2: { text: 'Negotiate Peace (20%)', cost: 0.2, reward: 1.4 }, option3: { text: 'Retreat', cost: 0, reward: 1.0 } }
+            ],
+            tier4: [
+                { title: 'Geopolitical Crisis', description: 'International situation affects markets.', option1: { text: 'Exploit Crisis (45%)', cost: 0.45, reward: 2.5 }, option2: { text: 'Hedge Position (20%)', cost: 0.2, reward: 1.5 }, option3: { text: 'Wait & Watch', cost: 0, reward: 1.0 } },
+                { title: 'DEA Manhunt', description: 'Federal-level investigation launched.', option1: { text: 'Pay Off Informants (50%)', cost: 0.5, reward: 1.8 }, option2: { text: 'Go Underground (25%)', cost: 0.25, reward: 1.4 }, option3: { text: 'Skip Prestige', cost: 0, reward: 0 } },
+                { title: 'Media Scandal', description: 'News outlets catching wind of operation.', option1: { text: 'Spin the Narrative (40%)', cost: 0.4, reward: 2.0 }, option2: { text: 'Keep Silent (10%)', cost: 0.1, reward: 1.1 } }
+            ],
+            tier5: [
+                { title: 'International Cartel Conflict', description: 'Global syndicates in dispute.', option1: { text: 'Forge Alliance (60%)', cost: 0.6, reward: 3.2 }, option2: { text: 'Play Both Sides (35%)', cost: 0.35, reward: 2.0 }, option3: { text: 'Neutrality Stance', cost: 0, reward: 1.0 } },
+                { title: 'Data Breach Risk', description: 'Cybersecurity threat detected.', option1: { text: 'Hire Top Hackers (50%)', cost: 0.5, reward: 2.5 }, option2: { text: 'DIY Solution (20%)', cost: 0.2, reward: 1.4 } },
+                { title: 'Illuminati Recruitment', description: '👁️ "We have been watching. Join us."', option1: { text: 'Accept Invitation (100% HU, +tokens)', cost: 1.0, reward: 0, tokens: 5 }, option2: { text: 'Decline', cost: 0, reward: 1.0 } }
+            ]
+        };
+    }
+
+    // PATCH v1.1: Terminal Tutorial Integration
+    setupTerminalTutorial() {
+        const terminalTutorialShown = localStorage.getItem('hashish_terminal_tutorial_shown');
+        if (!terminalTutorialShown) {
+            this.terminalTutorialPending = true;
+        }
+    }
+
+    // PATCH v1.1: Check terminal tutorial trigger at L15
+    checkTerminalTutorial() {
+        if (this.terminalTutorialPending && this.gameState.illuminationLevel === 15) {
+            const modal = document.getElementById('event-modal');
+            const title = document.getElementById('modal-title');
+            const description = document.getElementById('modal-description');
+            const btn1 = document.getElementById('modal-btn1');
+            const btn2 = document.getElementById('modal-btn2');
+
+            title.textContent = '🖥️ SYSTEM UPGRADE: Terminal Access Unlocked';
+            description.textContent = 'Advanced control interface detected. You now have access to system commands. Learn: type \'help\' in terminal.';
+            btn1.textContent = 'Access Terminal (Gift: 10K HU)';
+            btn2.textContent = 'Later';
+
+            modal.classList.remove('hidden');
+            this.currentTerminalTutorial = true;
+            this.terminalTutorialPending = false;
+            localStorage.setItem('hashish_terminal_tutorial_shown', 'true');
+        }
+    }
+
+    // Prestige system (PATCH v1.1: Enhanced with token multipliers)
     prestige() {
         if (this.gameState.illuminationLevel < 10) return;
 
-        const tokensEarned = Math.floor(this.gameState.illuminationLevel / 5);
+        // PATCH v1.1: Calculate prestige milestones with scaled rewards
+        let tokensEarned = Math.floor(this.gameState.illuminationLevel / 5);
+        
+        // Apply token multipliers
+        if (this.gameState.hasDoubleTokenBuff) {
+            tokensEarned *= 3; // 3x token payout from Rush buff
+            this.gameState.hasDoubleTokenBuff = false;
+            this.addToLog('⚡ RUSH BONUS: 3x Token Payout Applied!');
+        } else if (this.prestigeTokenMultiplier > 1) {
+            tokensEarned *= this.prestigeTokenMultiplier; // 2x from permanent buff
+            this.addToLog(`🌀 DIMENSIONAL ECHO: ${this.prestigeTokenMultiplier}x Token Multiplier`);
+        }
+        
         this.gameState.enlightenmentTokens += tokensEarned;
         this.gameState.prestigeLevel++;
         this.gameState.globalMultiplier += 0.1 * tokensEarned;
+
+        // PATCH v1.1: Prestige milestone achievements
+        const prestigeMsg = this.getPrestigeMilestoneMessage(this.gameState.prestigeLevel);
 
         // Reset progress
         this.gameState.hashUnits = 0;
         this.gameState.hashPerSecond = 0;
         this.gameState.illuminationLevel = 1;
         
+        // PATCH v1.1: Apply accelerated progression on first run after purchase
+        if (this.gameState.acceleratedProgressionActive) {
+            this.gameState.illuminationLevel = 6; // Skip to L6
+            this.gameState.totalHashEarned = 250000; // Enough for L6 progression
+            this.gameState.acceleratedProgressionActive = false;
+            this.addToLog('🏛️ ARCHITECT\'S INSIGHT: Fast-tracked to Level 6!');
+        }
+        
         // Reset upgrades
         Object.values(this.upgrades).forEach(category => {
             category.forEach(upgrade => upgrade.owned = 0);
         });
 
-        this.addToLog(`PRESTIGE! Gained ${tokensEarned} Enlightenment Tokens`);
+        this.addToLog(`PRESTIGE! Gained ${tokensEarned} Enlightenment Tokens. ${prestigeMsg}`);
         this.updateDisplay();
+    }
+
+    // PATCH v1.1: Get prestige milestone message
+    getPrestigeMilestoneMessage(prestigeLevel) {
+        if (prestigeLevel === 1) return 'Bronze Prestige Unlocked';
+        if (prestigeLevel === 2) return 'Silver Prestige + 20% Speed Boost';
+        if (prestigeLevel === 3) return 'Gold Prestige + 2x Prestige Speed Enabled';
+        if (prestigeLevel === 5) return 'Platinum Prestige Achieved';
+        if (prestigeLevel === 8) return 'Diamond Status - Token Shop Available!';
+        if (prestigeLevel === 13) return 'Legendary Prestige - Unlock New Empire Branch';
+        return 'Prestige Chain Growing Stronger';
     }
 
     // Level progression system
@@ -457,6 +737,14 @@ class HashishEmpire {
             // Show Illuminati eye at higher levels
             if (newLevel >= 15) {
                 document.getElementById('illuminati-eye').classList.remove('hidden');
+            }
+
+            // Unlock other empires at Level 33 (Game Completion)
+            if (newLevel >= 33 && !localStorage.getItem('hashish_empire_unlocked')) {
+                localStorage.setItem('hashish_empire_unlocked', 'true');
+                this.addToLog('🔓 SYSTEM UNLOCKED: New Empires available in Launcher');
+                setTimeout(() => alert("👁️ ILLUMINATION COMPLETE 👁️\nYou have unlocked new timelines.\nRestart the application to access the Empire Launcher."), 1000);
+                document.getElementById('change-empire-btn').classList.remove('hidden');
             }
         }
     }
@@ -585,8 +873,13 @@ class HashishEmpire {
         if (affordable) div.classList.add('affordable');
         if (upgrade.owned > 0) div.classList.add('owned');
 
+        // Extract emoji/icon from name if it exists
+        const nameMatch = upgrade.name.match(/^([^\s]+)\s(.*)/);
+        const icon = nameMatch ? nameMatch[1] : '';
+        const cleanName = nameMatch ? nameMatch[2] : upgrade.name;
+
         div.innerHTML = `
-            <div class="upgrade-name">${upgrade.name} ${upgrade.owned > 0 ? `(${upgrade.owned})` : ''}</div>
+            <div class="upgrade-name"><span class="upgrade-icon">${icon}</span> ${cleanName} ${upgrade.owned > 0 ? `<span class="upgrade-count">(${upgrade.owned})</span>` : ''}</div>
             <div class="upgrade-description">${upgrade.description}</div>
             <div class="upgrade-cost">Cost: ${this.formatNumber(cost)} ${this.config.currencySymbol}</div>
             ${upgrade.baseProduction ? `<div class="upgrade-production">+${this.formatNumber(upgrade.baseProduction)} ${this.config.currencySymbol}/sec</div>` : ''}
@@ -812,7 +1105,11 @@ class HashishEmpire {
         document.getElementById('enlightenment-tokens').textContent = this.gameState.enlightenmentTokens;
         document.getElementById('global-multiplier').textContent = `${this.gameState.globalMultiplier.toFixed(2)}x`;
 
+        // Update prestige tab visibility based on level
+        this.updatePrestigeTabVisibility();
+
         // Update prestige button
+
         const prestigeBtn = document.getElementById('prestige-btn');
         prestigeBtn.disabled = this.gameState.illuminationLevel < 10;
 
@@ -987,7 +1284,290 @@ class GameLauncher {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Hide game container initially
-    document.querySelector('.game-container').classList.add('hidden');
-    window.launcher = new GameLauncher();
+    // Initialize Backend Client
+    if (typeof BackendClient !== 'undefined') {
+        window.backend = new BackendClient('http://localhost:3001');
+        window.backend.connect();
+    } else {
+        console.warn('⚠️ BackendClient not loaded');
+    }
+
+    // --- PWA INSTALL PROMPT LOGIC ---
+    const pwaModal = document.getElementById('pwa-modal');
+    const installBtn = document.getElementById('pwa-install-btn');
+    const closeBtn = document.getElementById('pwa-close-btn');
+    let deferredPrompt;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        if (pwaModal) pwaModal.classList.remove('hidden');
+    });
+
+    if (installBtn) {
+        installBtn.addEventListener('click', () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    deferredPrompt = null;
+                    pwaModal.classList.add('hidden');
+                });
+            } else {
+                // Fallback for iOS/Manual
+                alert("To install: Tap 'Share' icon and select 'Add to Home Screen'");
+                pwaModal.classList.add('hidden');
+            }
+        });
+    }
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            if (pwaModal) pwaModal.classList.add('hidden');
+        });
+    }
+
+    // Force show on mobile if not standalone (immediate request)
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    
+    if (isMobile && !isStandalone) {
+        setTimeout(() => {
+            if (pwaModal) pwaModal.classList.remove('hidden');
+        }, 2000);
+    }
+
+    // --- LEADERBOARD UI SETUP ---
+    const leaderboardModal = document.getElementById('leaderboard-modal');
+    const leaderboardToggleBtn = document.getElementById('leaderboard-toggle-btn');
+    const leaderboardCloseBtn = document.getElementById('leaderboard-close-btn');
+    const leaderboardTabs = document.querySelectorAll('.leaderboard-tab-btn');
+    
+    if (leaderboardToggleBtn) {
+        leaderboardToggleBtn.addEventListener('click', () => {
+            leaderboardModal.classList.remove('hidden');
+            loadLeaderboard('global');
+        });
+    }
+
+    if (leaderboardCloseBtn) {
+        leaderboardCloseBtn.addEventListener('click', () => {
+            leaderboardModal.classList.add('hidden');
+        });
+    }
+
+    leaderboardTabs.forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            const category = e.target.dataset.category;
+            leaderboardTabs.forEach(t => t.classList.remove('active'));
+            e.target.classList.add('active');
+            
+            const tables = document.querySelectorAll('.leaderboard-table');
+            tables.forEach(t => t.classList.remove('active'));
+            document.getElementById(`category-${category}`).classList.add('active');
+            
+            loadLeaderboard(category);
+        });
+    });
+
+    // Close modal on background click
+    leaderboardModal?.addEventListener('click', (e) => {
+        if (e.target === leaderboardModal) {
+            leaderboardModal.classList.add('hidden');
+        }
+    });
+
+    // --- LEADERBOARD FUNCTIONS ---
+    async function loadLeaderboard(category) {
+        const loading = document.getElementById('leaderboard-loading');
+        const error = document.getElementById('leaderboard-error');
+        
+        loading.classList.remove('hidden');
+        error.classList.add('hidden');
+        
+        try {
+            if (category === 'global') {
+                await loadGlobalLeaderboard();
+            } else if (category === 'myrank') {
+                await loadPlayerRank();
+            } else {
+                await loadCategoryLeaderboard(category);
+            }
+        } catch (err) {
+            console.error('Leaderboard error:', err);
+            error.textContent = '⚠️ Failed to load leaderboard. Ensure backend is running at http://localhost:3001';
+            error.classList.remove('hidden');
+        } finally {
+            loading.classList.add('hidden');
+        }
+    }
+
+    async function loadGlobalLeaderboard() {
+        const rows = document.getElementById('global-rows');
+        
+        if (!window.backend) {
+            rows.innerHTML = '<div class="leaderboard-row">⚠️ Backend not connected. Run: cd backend && npm start</div>';
+            return;
+        }
+
+        try {
+            const data = await window.backend.getLeaderboard(100);
+            if (!data || data.length === 0) {
+                rows.innerHTML = '<div class="leaderboard-row">No players yet. Be the first!</div>';
+                return;
+            }
+
+            rows.innerHTML = data.map((player, index) => {
+                const rank = index + 1;
+                let rankBadge = rank;
+                if (rank === 1) rankBadge = '🥇';
+                else if (rank === 2) rankBadge = '🥈';
+                else if (rank === 3) rankBadge = '🥉';
+                
+                return `
+                    <div class="leaderboard-row">
+                        <span class="rank-badge rank-${rank <= 3 ? 'top-' + rank : ''}">${rankBadge}</span>
+                        <span class="name-col">${player.playerId.substring(0, 12)}...</span>
+                        <span class="level-col">Level ${player.illuminationLevel || 1}</span>
+                        <span class="value-col">${formatNumber(player.hashUnits || 0)}</span>
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            rows.innerHTML = `<div class="leaderboard-row">Error loading leaderboard</div>`;
+        }
+    }
+
+    async function loadPlayerRank() {
+        const playerRankInfo = document.getElementById('player-rank-info');
+        const rankNeighborsList = document.getElementById('rank-neighbors-list');
+        
+        if (!window.backend || !window.game) {
+            playerRankInfo.innerHTML = '<div style="color: #ff3333;">⚠️ Backend or game not initialized</div>';
+            return;
+        }
+
+        try {
+            const playerId = window.backend.playerId;
+            const rankData = await window.backend.getPlayerRank(playerId, 3); // 3 neighbors on each side
+            
+            if (!rankData) {
+                playerRankInfo.innerHTML = '<div style="color: #ff3333;">Player not found in leaderboard</div>';
+                return;
+            }
+
+            const gameState = window.game.gameState;
+            document.getElementById('player-rank-number').textContent = rankData.rank || '—';
+            document.getElementById('player-rank-id').textContent = playerId.substring(0, 8) + '...';
+            document.getElementById('player-rank-level').textContent = gameState.illuminationLevel || 1;
+            document.getElementById('player-rank-hu').textContent = formatNumber(gameState.hashUnits || 0);
+            document.getElementById('player-rank-cps').textContent = (window.game.displayedCPS || 0).toFixed(1);
+
+            // Display neighbors
+            if (rankData.neighbors && rankData.neighbors.length > 0) {
+                rankNeighborsList.innerHTML = rankData.neighbors.map((neighbor, idx) => {
+                    const offset = idx - Math.floor(rankData.neighbors.length / 2);
+                    const isCurrentPlayer = neighbor.playerId === playerId;
+                    return `
+                        <div class="rank-neighbor-item ${isCurrentPlayer ? 'player-highlight' : ''}">
+                            <span class="rank-neighbor-rank">#${neighbor.rank}</span>
+                            <span>${neighbor.playerId.substring(0, 12)}...</span>
+                            <span>${formatNumber(neighbor.hashUnits || 0)} HU</span>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                rankNeighborsList.innerHTML = '<div class="rank-neighbor-item">No neighbors in ranking</div>';
+            }
+        } catch (err) {
+            console.error('Player rank error:', err);
+            playerRankInfo.innerHTML = '<div style="color: #ff3333;">Failed to load player rank</div>';
+        }
+    }
+
+    async function loadCategoryLeaderboard(category) {
+        const rows = document.getElementById(`${category}-rows`);
+        
+        if (!window.backend) {
+            rows.innerHTML = '<div class="leaderboard-row">⚠️ Backend not connected</div>';
+            return;
+        }
+
+        try {
+            const data = await window.backend.getLeaderboardCategory(category);
+            if (!data || data.length === 0) {
+                rows.innerHTML = '<div class="leaderboard-row">No data available for this category</div>';
+                return;
+            }
+
+            rows.innerHTML = data.map((player, index) => {
+                const rank = index + 1;
+                let rankBadge = rank;
+                if (rank === 1) rankBadge = '🥇';
+                else if (rank === 2) rankBadge = '🥈';
+                else if (rank === 3) rankBadge = '🥉';
+                
+                let value = '';
+                switch (category) {
+                    case 'maxCPS':
+                        value = (player.maxCPS || 0).toFixed(1) + ' CPS';
+                        break;
+                    case 'prestige':
+                        value = `Level ${player.prestigeLevel || 0}`;
+                        break;
+                    case 'totalClicks':
+                        value = formatNumber(player.totalClicks || 0);
+                        break;
+                    default:
+                        value = formatNumber(player.value || 0);
+                }
+                
+                return `
+                    <div class="leaderboard-row">
+                        <span class="rank-badge rank-${rank <= 3 ? 'top-' + rank : ''}">${rankBadge}</span>
+                        <span class="name-col">${player.playerId.substring(0, 12)}...</span>
+                        <span class="level-col">Level ${player.illuminationLevel || 1}</span>
+                        <span class="value-col">${value}</span>
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error('Category leaderboard error:', err);
+            rows.innerHTML = `<div class="leaderboard-row">Error loading ${category} leaderboard</div>`;
+        }
+    }
+
+    function formatNumber(num) {
+        if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
+        if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
+        if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
+        return Math.floor(num).toString();
+    }
+
+    // --- GAME STARTUP LOGIC ---
+    const unlocked = localStorage.getItem('hashish_empire_unlocked') === 'true';
+
+    if (unlocked) {
+        // If game completed previously, show Launcher to choose empire
+        document.querySelector('.game-container').classList.add('hidden');
+        window.launcher = new GameLauncher();
+    } else {
+        // Default: Start directly into Hashish Empire (Syndicate)
+        document.querySelector('.game-container').classList.remove('hidden');
+        
+        if (window.EMPIRE_DATA && window.EMPIRE_DATA.syndicate) {
+            const empireKey = 'syndicate';
+            const empireData = window.EMPIRE_DATA[empireKey];
+            
+            document.body.className = empireData.meta.theme;
+            const fullConfig = { ...empireData.config, upgrades: empireData.upgrades, empireKey: empireKey };
+            
+            window.game = new HashishEmpire(fullConfig);
+            window.game.switchTab('production');
+            window.dispatchEvent(new Event('game-ready'));
+            console.log('👁️ Direct Entry: Syndicate Protocol Initiated');
+        } else {
+            console.error('CRITICAL: Empire Data missing for direct start.');
+            document.body.innerHTML = '<h1 style="color:red;text-align:center;margin-top:50px">ERROR: EMPIRE DATA MISSING</h1><p style="text-align:center;color:#fff">Please ensure empires.js is loaded.</p>';
+        }
+    }
 });

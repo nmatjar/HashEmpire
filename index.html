@@ -57,11 +57,15 @@
 
                 <!-- Save/Load/Console Panel -->
                 <div class="save-panel">
-                    <button class="action-btn" id="save-btn">💾 <span class="btn-text">SAVE</span></button>
-                    <button class="action-btn" id="load-btn">📁 <span class="btn-text">LOAD</span></button>
-                    <button class="action-btn" id="reset-btn">🔄 <span class="btn-text">RESET</span></button>
-                    <button class="action-btn" id="console-btn">_</button>
-                    <button class="action-btn" onclick="window.open('illumination-store/index.html', '_blank')">🛒 <span class="btn-text">MERCH</span></button>
+                    <button class="action-btn" id="save-btn" title="Save"><span class="btn-icon">💾</span><span class="btn-text">SAVE</span></button>
+                    <button class="action-btn" id="load-btn" title="Load"><span class="btn-icon">📁</span><span class="btn-text">LOAD</span></button>
+                    <button class="action-btn" id="reset-btn" title="Reset"><span class="btn-icon">🔄</span><span class="btn-text">RESET</span></button>
+                    <button class="action-btn" id="console-btn" title="Terminal"><span class="btn-icon">⌨️</span><span class="btn-text">CONSOLE</span></button>
+                    <button class="action-btn" onclick="window.open('illumination-store/index.html', '_blank')" title="Merchandise"><span class="btn-icon">🛒</span><span class="btn-text">MERCH</span></button>
+                    <button class="action-btn hidden" id="change-empire-btn" title="Change Empire"><span class="btn-icon">🌐</span><span class="btn-text">EMPIRES</span></button>
+                    <div class="menu-divider"></div>
+                    <button class="action-btn" id="audio-toggle-btn" title="Sound Settings"><span class="btn-icon">🔊</span><span class="btn-text">SOUND</span></button>
+                    <button class="action-btn" id="leaderboard-toggle-btn" title="Leaderboard"><span class="btn-icon">🏆</span><span class="btn-text">LEADERBOARD</span></button>
                 </div>
                 
                 <!-- Illuminati Eye (appears at higher levels) -->
@@ -160,15 +164,149 @@
             </div>
         </div>
 
-        <!-- Save/Load Panel -->
-        <div class="save-panel">
-            <button class="save-btn" id="save-btn">💾 SAVE</button>
-            <button class="load-btn" id="load-btn">📁 LOAD</button>
-            <button class="reset-btn" id="reset-btn">🔄 RESET</button>
+        <!-- Leaderboard Modal -->
+        <div class="modal hidden" id="leaderboard-modal">
+            <div class="modal-content leaderboard-modal">
+                <div class="leaderboard-header">
+                    <h3>🏆 ILLUMINATION LEADERBOARD</h3>
+                    <button class="leaderboard-close-btn" id="leaderboard-close-btn">&times;</button>
+                </div>
+                
+                <div class="leaderboard-tabs">
+                    <button class="leaderboard-tab-btn active" data-category="global">GLOBAL TOP 100</button>
+                    <button class="leaderboard-tab-btn" data-category="myrank">MY RANK</button>
+                    <button class="leaderboard-tab-btn" data-category="maxCPS">FASTEST CLICKERS</button>
+                    <button class="leaderboard-tab-btn" data-category="prestige">PRESTIGE MASTERS</button>
+                    <button class="leaderboard-tab-btn" data-category="totalClicks">MOST CLICKS</button>
+                </div>
+
+                <div class="leaderboard-content">
+                    <div id="leaderboard-loading" class="leaderboard-loading hidden">⏳ Loading rankings...</div>
+                    <div id="leaderboard-error" class="leaderboard-error hidden"></div>
+                    
+                    <!-- Global Top 100 -->
+                    <div class="leaderboard-table active" id="category-global">
+                        <div class="leaderboard-header-row">
+                            <span class="rank-col">Rank</span>
+                            <span class="name-col">Player</span>
+                            <span class="level-col">Level</span>
+                            <span class="value-col">Hash Units</span>
+                        </div>
+                        <div class="leaderboard-rows" id="global-rows">
+                            <div class="leaderboard-row">Loading...</div>
+                        </div>
+                    </div>
+
+                    <!-- My Rank -->
+                    <div class="leaderboard-table" id="category-myrank">
+                        <div class="player-rank-card">
+                            <div id="player-rank-info">
+                                <div class="player-rank-rank">Rank: <span id="player-rank-number">--</span></div>
+                                <div class="player-rank-name">Player ID: <span id="player-rank-id">--</span></div>
+                                <div class="player-rank-stats">
+                                    <div>Level: <span id="player-rank-level">1</span></div>
+                                    <div>Hash Units: <span id="player-rank-hu">0</span></div>
+                                    <div>CPS: <span id="player-rank-cps">0</span></div>
+                                </div>
+                            </div>
+                            <div class="rank-neighbors">
+                                <h4>Nearby Rankings</h4>
+                                <div id="rank-neighbors-list">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fastest Clickers -->
+                    <div class="leaderboard-table" id="category-maxCPS">
+                        <div class="leaderboard-header-row">
+                            <span class="rank-col">Rank</span>
+                            <span class="name-col">Player</span>
+                            <span class="level-col">Level</span>
+                            <span class="value-col">Max CPS</span>
+                        </div>
+                        <div class="leaderboard-rows" id="maxCPS-rows">
+                            <div class="leaderboard-row">Loading...</div>
+                        </div>
+                    </div>
+
+                    <!-- Prestige Masters -->
+                    <div class="leaderboard-table" id="category-prestige">
+                        <div class="leaderboard-header-row">
+                            <span class="rank-col">Rank</span>
+                            <span class="name-col">Player</span>
+                            <span class="level-col">Level</span>
+                            <span class="value-col">Prestige Level</span>
+                        </div>
+                        <div class="leaderboard-rows" id="prestige-rows">
+                            <div class="leaderboard-row">Loading...</div>
+                        </div>
+                    </div>
+
+                    <!-- Most Clicks -->
+                    <div class="leaderboard-table" id="category-totalClicks">
+                        <div class="leaderboard-header-row">
+                            <span class="rank-col">Rank</span>
+                            <span class="name-col">Player</span>
+                            <span class="level-col">Level</span>
+                            <span class="value-col">Total Clicks</span>
+                        </div>
+                        <div class="leaderboard-rows" id="totalClicks-rows">
+                            <div class="leaderboard-row">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Settings Modal -->
+        <div class="modal hidden" id="audio-modal">
+            <div class="modal-content audio-modal-content">
+                <div class="modal-header">
+                    <h3>🔊 SOUND SETTINGS</h3>
+                    <button class="close-btn" onclick="document.getElementById('audio-modal').classList.add('hidden')">&times;</button>
+                </div>
+                <div class="audio-settings">
+                    <div class="sound-option">
+                        <label>Master Volume</label>
+                        <input type="range" id="master-volume" min="0" max="100" value="100" class="volume-slider">
+                        <span id="master-volume-display">100%</span>
+                    </div>
+                    <div class="sound-option">
+                        <label>Click Sound</label>
+                        <input type="checkbox" id="click-sound" checked class="audio-checkbox">
+                        <span class="checkbox-label">Enable click feedback</span>
+                    </div>
+                    <div class="sound-option">
+                        <label>Notification Sound</label>
+                        <input type="checkbox" id="notification-sound" checked class="audio-checkbox">
+                        <span class="checkbox-label">Enable notifications</span>
+                    </div>
+                    <div class="sound-option">
+                        <label>Background Music</label>
+                        <input type="checkbox" id="bg-music" unchecked class="audio-checkbox">
+                        <span class="checkbox-label">Enable ambience</span>
+                    </div>
+                </div>
+                <div class="modal-buttons" style="margin-top: 20px;">
+                    <button class="modal-btn" onclick="document.getElementById('audio-modal').classList.add('hidden')">CLOSE</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- PWA Install Modal -->
+    <div id="pwa-modal" class="modal hidden">
+        <div class="modal-content pwa-content">
+            <h3 style="color: #00ff00;">📱 SYSTEM UPGRADE AVAILABLE</h3>
+            <p>Install the secure uplink to your home screen for optimal performance.</p>
+            <div class="modal-buttons">
+                <button class="modal-btn" id="pwa-install-btn">INSTALL UPLINK</button>
+                <button class="modal-btn" id="pwa-close-btn">IGNORE</button>
+            </div>
         </div>
     </div>
 
     <script src="empires.js"></script>
+    <script src="backend-client.js"></script>
     <script src="game.js"></script>
     <script src="terminal.js"></script>
     <script src="achievements.js"></script>
